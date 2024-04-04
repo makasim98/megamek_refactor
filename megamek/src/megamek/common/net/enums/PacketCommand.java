@@ -27,6 +27,7 @@ public enum PacketCommand {
     CLIENT_NAME,
     CLIENT_VERSIONS,
     LOCAL_PN,
+    LEADERBOARD_UPDATE,
     PLAYER_ADD,
     PLAYER_REMOVE,
     PLAYER_UPDATE,

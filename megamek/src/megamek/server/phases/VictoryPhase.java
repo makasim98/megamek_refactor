@@ -10,6 +10,7 @@ import megamek.common.util.EmailService;
 import megamek.server.GameManager;
 import megamek.server.Server;
 import megamek.server.UnitStatusFormatter;
+import megamek.server.victory.VictoryResult;
 import org.apache.logging.log4j.LogManager;
 
 import java.util.Enumeration;
@@ -27,6 +28,11 @@ public class VictoryPhase extends AbstractGamePhase{
         GameVictoryEvent gve = new GameVictoryEvent(gameManager, game);
         game.processGameEvent(gve);
         transmitGameVictoryEventToAll();
+
+        //Update server leaderboard
+        VictoryResult vr = gameManager.getGame().getVictoryResult();
+        Server.getServerInstance().updatePlayerRankings(vr);
+
         gameManager.resetGame();
         return Optional.empty();
     }
