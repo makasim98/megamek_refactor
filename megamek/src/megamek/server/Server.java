@@ -37,7 +37,9 @@ import megamek.common.options.OptionsConstants;
 import megamek.common.preference.PreferenceManager;
 import megamek.common.util.EmailService;
 import megamek.common.util.SerializationHelper;
+import megamek.leaderboard.*;
 import megamek.server.commands.ServerCommand;
+import megamek.server.victory.VictoryResult;
 import org.apache.logging.log4j.LogManager;
 
 import java.io.*;
@@ -58,6 +60,8 @@ public class Server implements Runnable {
     private final String password;
 
     private final IGameManager gameManager;
+
+    private final ILeaderboardManager leaderboardManager = new LeaderboardManager(LeaderboardStorage.CSV, RankingStrategy.ELO);
 
     private final String metaServerUrl;
 
@@ -684,6 +688,9 @@ public class Server implements Runnable {
         connectionsPending.remove(conn);
         connections.add(conn);
         connectionIds.put(conn.getId(), conn);
+
+        //Send leaderboard rankings to client
+        send(connId, new Packet(PacketCommand.LEADERBOARD_UPDATE, leaderboardManager.getRankings()));
 
         // add and validate the player info
         if (!returning) {
@@ -1390,5 +1397,10 @@ public class Server implements Runnable {
         Report r = new Report(1230);
         r.add(roll.getReport());
         gameManager.addReport(r);
+    }
+
+    public void updatePlayerRankings(VictoryResult vr) {
+        List<PlayerStats> updatedRankings = leaderboardManager.updateRankings(vr);
+        send(new Packet(PacketCommand.LEADERBOARD_UPDATE, updatedRankings));
     }
 }
