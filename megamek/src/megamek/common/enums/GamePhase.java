@@ -21,51 +21,68 @@ package megamek.common.enums;
 import megamek.MegaMek;
 import megamek.common.*;
 import megamek.common.options.OptionsConstants;
+import megamek.server.GameManager;
+import megamek.server.phases.*;
 
+import java.lang.reflect.InvocationTargetException;
 import java.util.Objects;
 import java.util.ResourceBundle;
 
 public enum GamePhase {
     //region Enum Declarations
-    UNKNOWN("GamePhase.UNKNOWN.text"),
-    LOUNGE("GamePhase.LOUNGE.text"),
-    SELECTION("GamePhase.SELECTION.text"),
-    EXCHANGE("GamePhase.EXCHANGE.text"),
-    DEPLOYMENT("GamePhase.DEPLOYMENT.text"),
-    INITIATIVE("GamePhase.INITIATIVE.text"),
-    INITIATIVE_REPORT("GamePhase.INITIATIVE_REPORT.text"),
-    TARGETING("GamePhase.TARGETING.text"),
-    TARGETING_REPORT("GamePhase.TARGETING_REPORT.text"),
-    PREMOVEMENT("GamePhase.PREMOVEMENT.text"),
-    MOVEMENT("GamePhase.MOVEMENT.text"),
-    MOVEMENT_REPORT("GamePhase.MOVEMENT_REPORT.text"),
-    OFFBOARD("GamePhase.OFFBOARD.text"),
-    OFFBOARD_REPORT("GamePhase.OFFBOARD_REPORT.text"),
-    POINTBLANK_SHOT("GamePhase.POINTBLANK_SHOT.text"), // Fake phase only reached through hidden units
-    PREFIRING("GamePhase.PREFIRING.text"),
-    FIRING("GamePhase.FIRING.text"),
-    FIRING_REPORT("GamePhase.FIRING_REPORT.text"),
-    PHYSICAL("GamePhase.PHYSICAL.text"),
-    PHYSICAL_REPORT("GamePhase.PHYSICAL_REPORT.text"),
-    END("GamePhase.END.text"),
-    END_REPORT("GamePhase.END_REPORT.text"),
-    VICTORY("GamePhase.VICTORY.text"),
-    DEPLOY_MINEFIELDS("GamePhase.DEPLOY_MINEFIELDS.text"),
-    STARTING_SCENARIO("GamePhase.STARTING_SCENARIO.text"),
-    SET_ARTILLERY_AUTOHIT_HEXES("GamePhase.SET_ARTILLERY_AUTOHIT_HEXES.text");
+    UNKNOWN("GamePhase.UNKNOWN.text", UnknownPhase.class),
+    LOUNGE("GamePhase.LOUNGE.text", LoungePhase.class),
+    SELECTION("GamePhase.SELECTION.text", SelectionPhase.class),
+    EXCHANGE("GamePhase.EXCHANGE.text", ExchangePhase.class),
+    DEPLOYMENT("GamePhase.DEPLOYMENT.text", DeploymentPhase.class),
+    INITIATIVE("GamePhase.INITIATIVE.text", InitiativePhase.class),
+    INITIATIVE_REPORT("GamePhase.INITIATIVE_REPORT.text", InitiativeReportPhase.class),
+    TARGETING("GamePhase.TARGETING.text", TargetingPhase.class),
+    TARGETING_REPORT("GamePhase.TARGETING_REPORT.text", TargetingReportPhase.class),
+    PREMOVEMENT("GamePhase.PREMOVEMENT.text", PremovementPhase.class),
+    MOVEMENT("GamePhase.MOVEMENT.text", MovementPhase.class),
+    MOVEMENT_REPORT("GamePhase.MOVEMENT_REPORT.text", MovementReportPhase.class),
+    OFFBOARD("GamePhase.OFFBOARD.text", OffboardPhase.class),
+    OFFBOARD_REPORT("GamePhase.OFFBOARD_REPORT.text", OffboardReportPhase.class),
+    POINTBLANK_SHOT("GamePhase.POINTBLANK_SHOT.text", PointblankPhase.class), // Fake phase only reached through hidden units
+    PREFIRING("GamePhase.PREFIRING.text", PrefiringPhase.class),
+    FIRING("GamePhase.FIRING.text", FiringPhase.class),
+    FIRING_REPORT("GamePhase.FIRING_REPORT.text", FiringReportPhase.class),
+    PHYSICAL("GamePhase.PHYSICAL.text", PhysicalPhase.class),
+    PHYSICAL_REPORT("GamePhase.PHYSICAL_REPORT.text", PhysicalReportPhase.class),
+    END("GamePhase.END.text", EndPhase.class),
+    END_REPORT("GamePhase.END_REPORT.text", EndReportPhase.class),
+    VICTORY("GamePhase.VICTORY.text", VictoryPhase.class),
+    DEPLOY_MINEFIELDS("GamePhase.DEPLOY_MINEFIELDS.text", DeployMinefieldsPhase.class),
+    STARTING_SCENARIO("GamePhase.STARTING_SCENARIO.text", StartingScenarioPhase.class),
+    SET_ARTILLERY_AUTOHIT_HEXES("GamePhase.SET_ARTILLERY_AUTOHIT_HEXES.text", SetArtilleryAutoHitHexesPhase.class);
     //endregion Enum Declarations
 
     //region Variable Declarations
     private final String name;
+    private final Class<? extends AbstractGamePhase> phaseClass;
+    private AbstractGamePhase phase;
     //endregion Variable Declarations
 
     //region Constructors
-    GamePhase(final String name) {
+    GamePhase(final String name, Class<? extends AbstractGamePhase> phaseClass)  {
         final ResourceBundle resources = ResourceBundle.getBundle("megamek.common.messages",
                 MegaMek.getMMOptions().getLocale());
         this.name = resources.getString(name);
+        this.phaseClass = phaseClass;
     }
     //endregion Constructors
+
+    public AbstractGamePhase getPhase(GameManager manager) {
+        try {
+            if (phase == null) {
+                phase = phaseClass.getConstructor(GameManager.class).newInstance(manager);
+            }
+        } catch (NoSuchMethodException | InvocationTargetException | InstantiationException | IllegalAccessException ex) {
+            ex.printStackTrace();
+        }
+        return phase;
+    }
 
     //region Boolean Comparison Methods
     public boolean isUnknown() {
