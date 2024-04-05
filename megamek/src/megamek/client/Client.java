@@ -50,6 +50,7 @@ import megamek.common.preference.PreferenceManager;
 import megamek.common.util.ImageUtil;
 import megamek.common.util.SerializationHelper;
 import megamek.common.util.StringUtil;
+import megamek.leaderboard.PlayerStats;
 import megamek.server.SmokeCloud;
 import org.apache.logging.log4j.LogManager;
 
@@ -84,6 +85,9 @@ public class Client implements IClientCommandHandler {
     protected int localPlayerNumber = -1;
     private String host;
     private int port;
+
+    // server player ranking leaderboard
+    private List<PlayerStats> rankings = new ArrayList<>();
 
     // the game state object
     protected Game game = new Game();
@@ -233,6 +237,10 @@ public class Client implements IClientCommandHandler {
         if (connection != null && !connection.isClosed()) {
             connection.update();
         }
+    }
+
+    public List<PlayerStats> getRankings(){
+        return rankings;
     }
 
     public void setBoardView(BoardView bv) {
@@ -1423,6 +1431,9 @@ public class Client implements IClientCommandHandler {
                     break;
                 case LOCAL_PN:
                     localPlayerNumber = c.getIntValue(0);
+                    break;
+                case LEADERBOARD_UPDATE:
+                    rankings = new ArrayList<>((List) c.getObject(0));
                     break;
                 case PLAYER_UPDATE:
                     receivePlayerInfo(c);

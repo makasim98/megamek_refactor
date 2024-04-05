@@ -115,6 +115,7 @@ public class ChatLounge extends AbstractPhaseDisplay implements
     private JPanel panUnits = new JPanel();
     private JPanel panMap = new JPanel();
     private JPanel panTeam = new JPanel();
+    private JPanel panRanking = new JPanel();
 
     // Labels
     private JLabel lblMapSummary = new JLabel("");
@@ -236,6 +237,10 @@ public class ChatLounge extends AbstractPhaseDisplay implements
     private JSplitPane splitPaneMain;
     ClientDialog teamOverviewWindow;
 
+
+    /* Leaderboard Panel */
+    private LeaderboardPanel panLeaderboard;
+
     private ImageLoader loader;
     private Map<String, Image> baseImages = new HashMap<>();
 
@@ -279,12 +284,14 @@ public class ChatLounge extends AbstractPhaseDisplay implements
         panTabs.add(Messages.getString("ChatLounge.name.selectUnits"), panUnits);
         panTabs.add(Messages.getString("ChatLounge.name.SelectMap"), panMap);
         panTabs.add(Messages.getString("ChatLounge.name.teamOverview"), panTeam);
+        panTabs.add(Messages.getString("ChatLounge.name.leaderboard"), panRanking);
         p.add(panTabs, BorderLayout.CENTER);
         splitPaneMain.setTopComponent(p);
         add(splitPaneMain);
 
         setupSorters();
         setupTeamOverview();
+        setupLeaderboard();
         setupPlayerConfig();
         refreshGameSettings();
         setupEntities();
@@ -437,6 +444,13 @@ public class ChatLounge extends AbstractPhaseDisplay implements
         // setup (but don't show) the detached team overview window
         teamOverviewWindow = new ClientDialog(clientgui.frame, Messages.getString("ChatLounge.name.teamOverview"), false);
         teamOverviewWindow.setSize(clientgui.frame.getWidth() / 2, clientgui.frame.getHeight() / 2);
+    }
+
+    private void setupLeaderboard() {
+        panLeaderboard = new LeaderboardPanel(clientgui);
+
+        panRanking.setLayout(new BoxLayout(panRanking, BoxLayout.PAGE_AXIS));
+        panRanking.add(panLeaderboard);
     }
 
     /** Re-attaches the Team Overview panel to the tab when the detached window is closed. */
@@ -1646,6 +1660,7 @@ public class ChatLounge extends AbstractPhaseDisplay implements
             refreshCamoButton();
             refreshEntities();
             panTeamOverview.refreshData();
+            panLeaderboard.refreshData();
         }
     }
 
@@ -3082,6 +3097,7 @@ public class ChatLounge extends AbstractPhaseDisplay implements
 
         int scaledBorder = UIUtil.scaleForGUI(TEAMOVERVIEW_BORDER);
         panTeam.setBorder(new EmptyBorder(scaledBorder, scaledBorder, scaledBorder, scaledBorder));
+        panLeaderboard.setBorder(new EmptyBorder(scaledBorder, scaledBorder, scaledBorder, scaledBorder));
 
         butBoardPreview.setToolTipText(scaleStringForGUI(Messages.getString("BoardSelectionDialog.ViewGameBoardTooltip")));
         butSaveMapSetup.setToolTipText(scaleStringForGUI(Messages.getString("ChatLounge.map.saveMapSetupTip")));
