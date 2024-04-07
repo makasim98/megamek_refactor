@@ -1,5 +1,6 @@
 package megamek.common.net.enums.commands;
 
+import megamek.common.net.packets.Packet;
 import megamek.server.GameManager;
 
 public class UnimplementedCommand extends AbstractPacketCommand{
@@ -8,7 +9,7 @@ public class UnimplementedCommand extends AbstractPacketCommand{
     }
 
     @Override
-    public void handle() {
+    public void handle(int connId, Packet packet) {
 
     }
 }

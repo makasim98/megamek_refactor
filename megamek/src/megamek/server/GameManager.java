@@ -613,7 +613,7 @@ public class GameManager implements IGameManager {
     }
 
     public void send(Packet p) {
-        Server.getServerInstance().send(p);
+        Server.getServerInstance().sendToAll(p);
     }
 
     public void send(int connId, Packet p) {

@@ -17,8 +17,6 @@ package megamek.server;
 
 import com.thoughtworks.xstream.XStream;
 import megamek.MMConstants;
-import megamek.MegaMek;
-import megamek.Version;
 import megamek.client.ui.swing.util.PlayerColour;
 import megamek.codeUtilities.StringUtility;
 import megamek.common.*;
@@ -27,6 +25,8 @@ import megamek.common.commandline.AbstractCommandLineParser.ParseException;
 import megamek.common.icons.Camouflage;
 import megamek.common.net.connections.AbstractConnection;
 import megamek.common.net.enums.PacketCommand;
+import megamek.common.net.enums.commands.AbstractPacketCommand;
+import megamek.common.net.enums.commands.UnimplementedCommand;
 import megamek.common.net.events.DisconnectedEvent;
 import megamek.common.net.events.PacketReceivedEvent;
 import megamek.common.net.factories.ConnectionFactory;
@@ -34,7 +34,6 @@ import megamek.common.net.listeners.ConnectionListener;
 import megamek.common.net.packets.Packet;
 import megamek.common.options.GameOptions;
 import megamek.common.options.OptionsConstants;
-import megamek.common.preference.PreferenceManager;
 import megamek.common.util.EmailService;
 import megamek.common.util.SerializationHelper;
 import megamek.leaderboard.*;
@@ -48,7 +47,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 import java.util.zip.GZIPInputStream;
 
@@ -63,13 +61,27 @@ public class Server implements Runnable {
 
     private final ILeaderboardManager leaderboardManager = new LeaderboardManager(LeaderboardStorage.CSV, RankingStrategy.ELO);
 
+    public ILeaderboardManager getLeaderboardManager() {
+        return leaderboardManager;
+    }
+
     private final String metaServerUrl;
 
     private final ServerSocket serverSocket;
 
+    public ServerSocket getServerSocket() {
+        return serverSocket;
+    }
+
     private final String motd;
 
+    public String getMotd() {
+        return motd;
+    }
+
     private final EmailService mailer;
+
+    private ConnectionManager connectionManager;
 
     public static class ReceivedPacket {
         private int connectionId;
@@ -133,18 +145,9 @@ public class Server implements Runnable {
     // commands
     private final Map<String, ServerCommand> commandsHash = new ConcurrentHashMap<>();
 
-    // game info
-    private final List<AbstractConnection> connections = new CopyOnWriteArrayList<>();
-
-    private final Map<Integer, ConnectionHandler> connectionHandlers = new ConcurrentHashMap<>();
-
-    private final ConcurrentLinkedQueue<ReceivedPacket> packetQueue = new ConcurrentLinkedQueue<>();
+    private final ConcurrentLinkedQueue<Server.ReceivedPacket> packetQueue = new ConcurrentLinkedQueue<>();
 
     private final boolean dedicated;
-
-    private final List<AbstractConnection> connectionsPending = new CopyOnWriteArrayList<>();
-
-    private final Map<Integer, AbstractConnection> connectionIds = new ConcurrentHashMap<>();
 
     private int connectionCounter;
 
@@ -170,23 +173,6 @@ public class Server implements Runnable {
 
     public static final String ORIGIN = "***Server";
 
-    // Easter eggs. Happy April Fool's Day!!
-    private static final String DUNE_CALL = "They tried and failed?";
-
-    private static final String DUNE_RESPONSE = "They tried and died!";
-
-    private static final String STAR_WARS_CALL = "I'd just as soon kiss a Wookiee.";
-
-    private static final String STAR_WARS_RESPONSE = "I can arrange that!";
-
-    private static final String INVADER_ZIM_CALL = "What does the G stand for?";
-
-    private static final String INVADER_ZIM_RESPONSE = "I don't know.";
-
-    private static final String WARGAMES_CALL = "Shall we play a game?";
-
-    private static final String WARGAMES_RESPONSE = "Let's play global thermonuclear war.";
-
     private final ConnectionListener connectionListener = new ConnectionListener() {
         /**
          * Called when it is sensed that a connection has terminated.
@@ -198,15 +184,10 @@ public class Server implements Runnable {
             // write something in the log
             LogManager.getLogger().info("s: connection " + conn.getId() + " disconnected");
 
-            connections.remove(conn);
             synchronized (serverLock) {
-                connectionsPending.remove(conn);
-                connectionIds.remove(conn.getId());
-                ConnectionHandler ch = connectionHandlers.get(conn.getId());
-                if (ch != null) {
-                    ch.signalStop();
-                    connectionHandlers.remove(conn.getId());
-                }
+                connectionManager.removePendingConnection(conn);
+                connectionManager.removeConnection(conn);
+                connectionManager.removeConnectionHandler(conn);
             }
             // if there's a player for this connection, remove it too
             Player player = getPlayer(conn.getId());
@@ -339,6 +320,7 @@ public class Server implements Runnable {
 
         // initialize server socket
         serverSocket = new ServerSocket(port);
+        connectionManager = ConnectionManager.getInstance();
 
         motd = createMotd();
 
@@ -480,14 +462,12 @@ public class Server implements Runnable {
 
         }
 
-        // kill pending connections
-        connectionsPending.forEach(AbstractConnection::close);
-        connectionsPending.clear();
+        connectionManager.clearPendingConnections();
 
         // Send "kill" commands to all connections
         // This WILL handle the connection end on both sides
-        send(new Packet(PacketCommand.CLOSE_CONNECTION));
-        connectionIds.clear();
+        sendToAll(new Packet(PacketCommand.CLOSE_CONNECTION));
+        connectionManager.clearConnectionIds();
 
         // Shutdown Email
         if (mailer != null) {
@@ -522,8 +502,8 @@ public class Server implements Runnable {
      * Returns a free connection id.
      */
     public int getFreeConnectionId() {
-        while ((getPendingConnection(connectionCounter) != null)
-                || (getConnection(connectionCounter) != null)
+        while ((connectionManager.getPendingConnection(connectionCounter) != null)
+                || (connectionManager.getConnection(connectionCounter) != null)
                 || (getPlayer(connectionCounter) != null)) {
             connectionCounter++;
         }
@@ -538,229 +518,18 @@ public class Server implements Runnable {
     }
 
     /**
-     * Allow the player to set whatever parameters he is able to
-     */
-    private void receivePlayerInfo(Packet packet, int connId) {
-        Player player = (Player) packet.getObject(0);
-        Player gamePlayer = getGame().getPlayer(connId);
-        if (null != gamePlayer) {
-            gamePlayer.setColour(player.getColour());
-            gamePlayer.setStartingPos(player.getStartingPos());
-            gamePlayer.setStartWidth(player.getStartWidth());
-            gamePlayer.setStartOffset(player.getStartOffset());
-            gamePlayer.setStartingAnyNWx(player.getStartingAnyNWx());
-            gamePlayer.setStartingAnyNWy(player.getStartingAnyNWy());
-            gamePlayer.setStartingAnySEx(player.getStartingAnySEx());
-            gamePlayer.setStartingAnySEy(player.getStartingAnySEy());
-            gamePlayer.setTeam(player.getTeam());
-            gamePlayer.setCamouflage(player.getCamouflage().clone());
-            gamePlayer.setNbrMFConventional(player.getNbrMFConventional());
-            gamePlayer.setNbrMFCommand(player.getNbrMFCommand());
-            gamePlayer.setNbrMFVibra(player.getNbrMFVibra());
-            gamePlayer.setNbrMFActive(player.getNbrMFActive());
-            gamePlayer.setNbrMFInferno(player.getNbrMFInferno());
-            if (gamePlayer.getConstantInitBonus() != player.getConstantInitBonus()) {
-                sendServerChat("Player " + gamePlayer.getName()
-                        + " changed their initiative bonus from "
-                        + gamePlayer.getConstantInitBonus() + " to "
-                        + player.getConstantInitBonus() + '.');
-            }
-            gamePlayer.setConstantInitBonus(player.getConstantInitBonus());
-            gamePlayer.setEmail(player.getEmail());
-        }
-    }
-
-    /**
-     * Correct a duplicate player name
-     *
-     * @param oldName the <code>String</code> old player name, that is a duplicate
-     * @return the <code>String</code> new player name
-     */
-    private String correctDupeName(String oldName) {
-        for (Enumeration<Player> i = getGame().getPlayers(); i.hasMoreElements(); ) {
-            Player player = i.nextElement();
-            if (player.getName().equals(oldName)) {
-                // We need to correct it.
-                String newName = oldName;
-                int dupNum;
-                try {
-                    dupNum = Integer.parseInt(oldName.substring(oldName.lastIndexOf('.') + 1));
-                    dupNum++;
-                    newName = oldName.substring(0, oldName.lastIndexOf('.'));
-                } catch (Exception e) {
-                    // If this fails, we don't care much.
-                    // Just assume it's the first time for this name.
-                    dupNum = 2;
-                }
-                newName = newName.concat(".").concat(Integer.toString(dupNum));
-                return correctDupeName(newName);
-            }
-        }
-        return oldName;
-    }
-
-    private boolean receivePlayerVersion(Packet packet, int connId) {
-        final Version version = (Version) packet.getObject(0);
-        if (!MMConstants.VERSION.is(version)) {
-            final String message = String.format("Client/Server Version Mismatch -- Client: %s, Server: %s",
-                    version, MMConstants.VERSION);
-            LogManager.getLogger().error(message);
-
-            final Player player = getPlayer(connId);
-            sendServerChat(String.format("For %s, Server reports:%s%s",
-                    ((player == null) ? "unknown player" : player.getName()), System.lineSeparator(),
-                    message));
-            return false;
-        }
-
-        final String clientChecksum = (String) packet.getObject(1);
-        final String serverChecksum = MegaMek.getMegaMekSHA256();
-        final String message;
-
-        // print a message indicating client doesn't have jar file
-        if (clientChecksum == null) {
-            message = "Client Checksum is null. Client may not have a jar file";
-            LogManager.getLogger().info(message);
-            // print message indicating server doesn't have jar file
-        } else if (serverChecksum == null) {
-            message = "Server Checksum is null. Server may not have a jar file";
-            LogManager.getLogger().info(message);
-            // print message indicating a client/server checksum mismatch
-        } else if (!clientChecksum.equals(serverChecksum)) {
-            message = String.format("Client/Server checksum mismatch. Server reports: %s, Client reports %s",
-                    serverChecksum, clientChecksum);
-            LogManager.getLogger().warn(message);
-        } else {
-            message = "";
-        }
-
-        // Now, if we need to, send message!
-        if (message.isEmpty()) {
-            LogManager.getLogger().info("SUCCESS: Client/Server Version (" + version + ") and Checksum ("
-                    + clientChecksum + ") matched");
-        } else {
-            Player player = getPlayer(connId);
-            sendServerChat(String.format("For %s, Server reports:%s%s",
-                    ((player == null) ? "unknown player" : player.getName()), System.lineSeparator(),
-                    message));
-        }
-
-        return true;
-    }
-
-    /**
-     * Receives a player name, sent from a pending connection, and connects that
-     * connection.
-     */
-    private void receivePlayerName(Packet packet, int connId) {
-        final AbstractConnection conn = getPendingConnection(connId);
-        String name = (String) packet.getObject(0);
-        boolean isBot = (boolean) packet.getObject(1);
-        boolean returning = false;
-
-        // this had better be from a pending connection
-        if (conn == null) {
-            LogManager.getLogger().warn("Got a client name from a non-pending connection");
-            return;
-        }
-
-        // check if they're connecting with the same name as a ghost player
-        for (Enumeration<Player> i = getGame().getPlayers(); i.hasMoreElements(); ) {
-            Player player = i.nextElement();
-            if (player.getName().equals(name)) {
-                if (player.isGhost()) {
-                    returning = true;
-                    player.setGhost(false);
-                    player.setBot(isBot);
-                    // switch id
-                    connId = player.getId();
-                    conn.setId(connId);
-                }
-            }
-        }
-
-        if (!returning) {
-            // Check to avoid duplicate names...
-            sendToPending(connId, new Packet(PacketCommand.SERVER_CORRECT_NAME, correctDupeName(name)));
-        }
-
-        // right, switch the connection into the "active" bin
-        connectionsPending.remove(conn);
-        connections.add(conn);
-        connectionIds.put(conn.getId(), conn);
-
-        //Send leaderboard rankings to client
-        send(connId, new Packet(PacketCommand.LEADERBOARD_UPDATE, leaderboardManager.getRankings()));
-
-        // add and validate the player info
-        if (!returning) {
-            addNewPlayer(connId, name, isBot);
-        }
-
-        // if it is not the lounge phase, this player becomes an observer
-        Player player = getPlayer(connId);
-        if (!getGame().getPhase().isLounge() && (null != player)
-                && (getGame().getEntitiesOwnedBy(player) < 1)) {
-            player.setObserver(true);
-        }
-
-        // send the player the motd
-        sendServerChat(connId, motd);
-
-        // send info that the player has connected
-        transmitPlayerConnect(player);
-
-        // tell them their local playerId
-        send(connId, new Packet(PacketCommand.LOCAL_PN, connId));
-
-        // send current game info
-        sendCurrentInfo(connId);
-
-        final boolean showIPAddressesInChat = PreferenceManager.getClientPreferences().getShowIPAddressesInChat();
-
-        try {
-            InetAddress[] addresses = InetAddress.getAllByName(InetAddress.getLocalHost().getHostName());
-            for (InetAddress address : addresses) {
-                LogManager.getLogger().info("s: machine IP " + address.getHostAddress());
-                if (showIPAddressesInChat) {
-                    sendServerChat(connId, "Machine IP is " + address.getHostAddress());
-                }
-            }
-        } catch (Exception ignored) {
-
-        }
-
-        LogManager.getLogger().info("s: listening on port " + serverSocket.getLocalPort());
-        if (showIPAddressesInChat) {
-            // Send the port we're listening on. Only useful for the player
-            // on the server machine to check.
-            sendServerChat(connId, "Listening on port " + serverSocket.getLocalPort());
-        }
-
-        // Get the player *again*, because they may have disconnected.
-        player = getPlayer(connId);
-        if (null != player) {
-            String who = player.getName() + " connected from " + getClient(connId).getInetAddress();
-            LogManager.getLogger().info("s: player #" + connId + ", " + who);
-            if (showIPAddressesInChat) {
-                sendServerChat(who);
-            }
-        } // Found the player
-    }
-
-    /**
      * Sends a player the info they need to look at the current phase. This is
      * triggered when a player first connects to the server.
      */
     public void sendCurrentInfo(int connId) {
-        transmitPlayerConnect(getClient(connId));
+        transmitPlayerConnect(connectionManager.getConnection(connId));
         gameManager.sendCurrentInfo(connId);
     }
 
     /**
      * Adds a new player to the game
      */
-    private Player addNewPlayer(int connId, String name, boolean isBot) {
+    public Player addNewPlayer(int connId, String name, boolean isBot) {
         int team = Player.TEAM_UNASSIGNED;
         if (getGame().getPhase().isLounge()) {
             team = Player.TEAM_NONE;
@@ -908,7 +677,7 @@ public class Server implements Runnable {
         }
 
         // update all the clients with the new game info
-        for (AbstractConnection conn : connections) {
+        for (AbstractConnection conn : connectionManager.getConnections()) {
             sendCurrentInfo(conn.getId());
         }
         return true;
@@ -935,74 +704,7 @@ public class Server implements Runnable {
      *                    inverse mapping from nameToIdMap
      */
     public void remapConnIds(Map<String, Integer> nameToIdMap, Map<Integer, String> idToNameMap) {
-        // Keeps track of connections without Ids
-        List<AbstractConnection> unassignedConns = new ArrayList<>();
-        // Keep track of which ids are used
-        Set<Integer> usedPlayerIds = new HashSet<>();
-        Set<String> currentPlayerNames = new HashSet<>();
-        for (Player p : getGame().getPlayersVector()) {
-            currentPlayerNames.add(p.getName());
-        }
-        // Map the old connection Id to new value
-        Map<Integer, Integer> connIdRemapping = new HashMap<>();
-        for (Player p : getGame().getPlayersVector()) {
-            // Check to see if this player was already connected
-            Integer oldId = nameToIdMap.get(p.getName());
-            if ((oldId != null) && (oldId != p.getId())) {
-                connIdRemapping.put(oldId, p.getId());
-            }
-            // If the old and new Ids match, make sure we remove ghost status
-            if ((oldId != null) && (oldId == p.getId())) {
-                p.setGhost(false);
-            }
-            // Check to see if this player's Id is taken
-            String oldName = idToNameMap.get(p.getId());
-            if ((oldName != null) && !oldName.equals(p.getName())) {
-                // If this name doesn't belong to a current player, unassign it
-                if (!currentPlayerNames.contains(oldName)) {
-                    unassignedConns.add(connectionIds.get(p.getId()));
-                    // Make sure we don't add this to unassigned connections twice
-                    connectionIds.remove(p.getId());
-                }
-                // If it does belong to a current player, it'll get handled
-                // when that player comes up
-            }
-            // Keep track of what Ids are used
-            usedPlayerIds.add(p.getId());
-        }
-
-        // Remap old connection Ids to new ones
-        for (Integer currConnId : connIdRemapping.keySet()) {
-            Integer newId = connIdRemapping.get(currConnId);
-            AbstractConnection conn = connectionIds.get(currConnId);
-            conn.setId(newId);
-            // If this Id is used, make sure we reassign that connection
-            if (connectionIds.containsKey(newId)) {
-                unassignedConns.add(connectionIds.get(newId));
-            }
-            // Map the new Id
-            connectionIds.put(newId, conn);
-
-            getGame().getPlayer(newId).setGhost(false);
-            send(newId, new Packet(PacketCommand.LOCAL_PN, newId));
-        }
-
-        // It's possible we have players not in the saved game, add 'em
-        for (AbstractConnection conn : unassignedConns) {
-            int newId = 0;
-            while (usedPlayerIds.contains(newId)) {
-                newId++;
-            }
-            String name = idToNameMap.get(conn.getId());
-            conn.setId(newId);
-            Player newPlayer = addNewPlayer(newId, name, false);
-            newPlayer.setObserver(true);
-            connectionIds.put(newId, conn);
-            send(newId, new Packet(PacketCommand.LOCAL_PN, newId));
-        }
-
-        // Ensure all clients are up-to-date on player info
-        transmitAllPlayerUpdates();
+        connectionManager.remapConnIds(nameToIdMap, idToNameMap, this);
     }
 
     /**
@@ -1010,48 +712,6 @@ public class Server implements Runnable {
      */
     public Player getPlayer(int id) {
         return getGame().getPlayer(id);
-    }
-
-    /**
-     * Removes all entities owned by the given player. Should only be called when it
-     * won't cause trouble (the lounge, for instance, or between phases.)
-     */
-    private void removeAllEntitiesOwnedBy(Player player) {
-        gameManager.removeAllEntitiesOwnedBy(player);
-    }
-
-    /**
-     * a shorter name for getConnection()
-     */
-    private AbstractConnection getClient(int connId) {
-        return getConnection(connId);
-    }
-
-    /**
-     * Executes the process on each active connection.
-     * @param process The process to execute.
-     */
-    public void forEachConnection(Consumer<AbstractConnection> process) {
-        connections.forEach(process);
-    }
-
-    /**
-     * Returns a connection, indexed by id
-     */
-    public AbstractConnection getConnection(int connId) {
-        return connectionIds.get(connId);
-    }
-
-    /**
-     * Returns a pending connection
-     */
-    public @Nullable AbstractConnection getPendingConnection(int connId) {
-        for (AbstractConnection conn : connectionsPending) {
-            if (conn.getId() == connId) {
-                return conn;
-            }
-        }
-        return null;
     }
 
     /**
@@ -1065,19 +725,9 @@ public class Server implements Runnable {
     }
 
     /**
-     * Sends out player info to all connections
-     */
-    private void transmitPlayerConnect(Player player) {
-        for (var connection : connections) {
-            var playerId = player.getId();
-            connection.send(createPlayerConnectPacket(player, playerId != connection.getId()));
-        }
-    }
-
-    /**
      * Creates a packet informing that the player has connected
      */
-    private Packet createPlayerConnectPacket(Player player, boolean isPrivate) {
+    public Packet createPlayerConnectPacket(Player player, boolean isPrivate) {
         var playerId = player.getId();
         var destPlayer = player;
         if (isPrivate) {
@@ -1092,8 +742,8 @@ public class Server implements Runnable {
     /**
      * Sends out player info updates for a player to all connections
      */
-    void transmitPlayerUpdate(Player player) {
-        for (var connection : connections) {
+    public void transmitPlayerUpdate(Player player) {
+        for (var connection : connectionManager.getConnections()) {
             var playerId = player.getId();
             var destPlayer = player;
 
@@ -1104,15 +754,6 @@ public class Server implements Runnable {
                 destPlayer.redactPrivateData();
             }
             connection.send(new Packet(PacketCommand.PLAYER_UPDATE, playerId, destPlayer));
-        }
-    }
-
-    /**
-     * Sends out the player info updates for all players to all connections
-     */
-    private void transmitAllPlayerUpdates() {
-        for (var player : getGame().getPlayersVector()) {
-            transmitPlayerUpdate(player);
         }
     }
 
@@ -1139,7 +780,7 @@ public class Server implements Runnable {
      * Transmits a chat message to all players
      */
     public void sendChat(String origin, String message) {
-        send(new Packet(PacketCommand.CHAT, formatChatMessage(origin, message)));
+        sendToAll(new Packet(PacketCommand.CHAT, formatChatMessage(origin, message)));
     }
 
     public void sendServerChat(int connId, String message) {
@@ -1150,18 +791,17 @@ public class Server implements Runnable {
         sendChat(ORIGIN, message);
     }
 
-    void send(Packet packet) {
-        connections.stream()
-                .filter(Objects::nonNull)
-                .forEach(connection -> connection.send(packet));
+    void sendToAll(Packet packet) {
+        connectionManager.sendToAll(packet);
     }
 
     /**
      * Send a packet to a specific connection.
      */
     public void send(int connId, Packet packet) {
-        if (getClient(connId) != null) {
-            getClient(connId).send(packet);
+        AbstractConnection connection = connectionManager.getConnection(connId);
+        if (connection != null) {
+            connection.send(packet);
         }
         // What should we do if we've lost this client?
         // For now, nothing.
@@ -1170,8 +810,8 @@ public class Server implements Runnable {
     /**
      * Send a packet to a pending connection
      */
-    private void sendToPending(int connId, Packet packet) {
-        AbstractConnection pendingConn = getPendingConnection(connId);
+    public void sendToPending(int connId, Packet packet) {
+        AbstractConnection pendingConn = connectionManager.getPendingConnection(connId);
         if (pendingConn != null) {
             pendingConn.send(packet);
         }
@@ -1182,7 +822,7 @@ public class Server implements Runnable {
     /**
      * Process an in-game command
      */
-    private void processCommand(int connId, String commandString) {
+    public void processCommand(int connId, String commandString) {
         // all tokens are read as strings; if they're numbers, string-ize 'em.
         // replaced the tokenizer with the split function.
         String[] args = commandString.split("\\s+");
@@ -1209,7 +849,7 @@ public class Server implements Runnable {
     protected void handle(int connId, Packet packet) {
         Player player = getGame().getPlayer(connId);
         // Check player. Please note, the connection may be pending.
-        if ((null == player) && (null == getPendingConnection(connId))) {
+        if ((null == player) && (null == connectionManager.getPendingConnection(connId))) {
             LogManager.getLogger().error("Server does not recognize player at connection " + connId);
             return;
         }
@@ -1218,70 +858,12 @@ public class Server implements Runnable {
             LogManager.getLogger().error("Got null packet");
             return;
         }
-        // act on it
-        switch (packet.getCommand()) {
-            case CLIENT_VERSIONS:
-                final boolean valid = receivePlayerVersion(packet, connId);
-                if (valid) {
-                    sendToPending(connId, new Packet(PacketCommand.SERVER_GREETING));
-                } else {
-                    sendToPending(connId, new Packet(PacketCommand.ILLEGAL_CLIENT_VERSION, MMConstants.VERSION));
-                    getPendingConnection(connId).close();
-                }
-                break;
-            case CLOSE_CONNECTION:
-                // We have a client going down!
-                AbstractConnection c = getConnection(connId);
-                if (c != null) {
-                    c.close();
-                }
-                break;
-            case CLIENT_NAME:
-                receivePlayerName(packet, connId);
-                break;
-            case PLAYER_UPDATE:
-                receivePlayerInfo(packet, connId);
-                validatePlayerInfo(connId);
-                transmitPlayerUpdate(getPlayer(connId));
-                break;
-            case CHAT:
-                String chat = (String) packet.getObject(0);
-                if (chat.startsWith("/")) {
-                    processCommand(connId, chat);
-                } else if (packet.getData().length > 1) {
-                    connId = (int) packet.getObject(1);
-                    if (connId == Player.PLAYER_NONE) {
-                        sendServerChat(chat);
-                    } else {
-                        sendServerChat(connId, chat);
-                    }
-                } else {
-                    sendChat(player.getName(), chat);
-                }
-                // Easter eggs. Happy April Fool's Day!!
-                if (DUNE_CALL.equalsIgnoreCase(chat)) {
-                    sendServerChat(DUNE_RESPONSE);
-                } else if (STAR_WARS_CALL.equalsIgnoreCase(chat)) {
-                    sendServerChat(STAR_WARS_RESPONSE);
-                } else if (INVADER_ZIM_CALL.equalsIgnoreCase(chat)) {
-                    sendServerChat(INVADER_ZIM_RESPONSE);
-                } else if (WARGAMES_CALL.equalsIgnoreCase(chat)) {
-                    sendServerChat(WARGAMES_RESPONSE);
-                }
-                break;
-            case LOAD_GAME:
-                try {
-                    sendServerChat(getPlayer(connId).getName() + " loaded a new game.");
-                    setGame((Game) packet.getObject(0));
-                    for (AbstractConnection conn : connections) {
-                        sendCurrentInfo(conn.getId());
-                    }
-                } catch (Exception e) {
-                    LogManager.getLogger().error("Error loading save game sent from client", e);
-                }
-                break;
-            default:
-                gameManager.handlePacket(connId, packet);
+        AbstractPacketCommand command = packet.getCommand().getCommand((GameManager) gameManager);
+        if (command instanceof UnimplementedCommand) {
+            gameManager.handlePacket(connId, packet);
+        }
+        else {
+            command.handle(connId, packet);
         }
     }
 
@@ -1302,11 +884,11 @@ public class Server implements Runnable {
                     AbstractConnection c = ConnectionFactory.getInstance().createServerConnection(s, id);
                     c.addConnectionListener(connectionListener);
                     c.open();
-                    connectionsPending.add(c);
+                    connectionManager.addPendingConnection(c);
                     ConnectionHandler ch = new ConnectionHandler(c);
                     Thread newConnThread = new Thread(ch, "Connection " + id);
                     newConnThread.start();
-                    connectionHandlers.put(id, ch);
+                    connectionManager.addConnectionHandler(id, ch);
 
                     clientVersionCheck(id);
                     ConnectionWatchdog w = new ConnectionWatchdog(this, id);
@@ -1354,7 +936,7 @@ public class Server implements Runnable {
                  DataOutputStream dos = new DataOutputStream(os)) {
                 String content = "port=" + URLEncoder.encode(Integer.toString(serverSocket.getLocalPort()), StandardCharsets.UTF_8);
                 if (register) {
-                    for (AbstractConnection iconn : connections) {
+                    for (AbstractConnection iconn : connectionManager.getConnections()) {
                         content += "&players[]=" + getPlayer(iconn.getId()).getName();
                     }
 
@@ -1401,6 +983,30 @@ public class Server implements Runnable {
 
     public void updatePlayerRankings(VictoryResult vr) {
         List<PlayerStats> updatedRankings = leaderboardManager.updateRankings(vr);
-        send(new Packet(PacketCommand.LEADERBOARD_UPDATE, updatedRankings));
+        sendToAll(new Packet(PacketCommand.LEADERBOARD_UPDATE, updatedRankings));
+    }
+
+    public void addConnection(AbstractConnection conn) {
+        connectionManager.addConnection(conn);
+    }
+
+    public void removePendingConnection(AbstractConnection conn) {
+        connectionManager.removePendingConnection(conn);
+    }
+
+    public AbstractConnection getConnection(int id) {
+        return connectionManager.getConnection(id);
+    }
+
+    public AbstractConnection getPendingConnection(int id) {
+        return connectionManager.getPendingConnection(id);
+    }
+
+    public List<AbstractConnection> getConnections() {
+        return connectionManager.getConnections();
+    }
+
+    public void forEachConnection(Consumer<AbstractConnection> process) {
+        connectionManager.forEachConnection(process);
     }
 }

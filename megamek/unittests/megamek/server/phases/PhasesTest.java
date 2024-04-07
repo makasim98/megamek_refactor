@@ -9,6 +9,7 @@ import megamek.common.options.GameOptions;
 import megamek.common.util.EmailService;
 import megamek.server.*;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.mockito.MockedStatic;
@@ -16,7 +17,6 @@ import org.mockito.Mockito;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Enumeration;
 import java.util.Vector;
 
 import static org.mockito.ArgumentMatchers.any;
@@ -26,6 +26,9 @@ import static org.mockito.Mockito.when;
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public class PhasesTest {
 
+    private MockedStatic<Server> staticMock;
+
+    private Server server;
     private GameManager manager;
     private Game game;
     private Board board;
@@ -118,6 +121,19 @@ public class PhasesTest {
     }
 
     @BeforeAll
+    public void initAll() {
+        Player player = Mockito.mock(Player.class);
+        Vector<Player> players = new Vector<>();
+        players.add(player);
+        EmailService email = Mockito.mock(EmailService.class);
+        when(email.getEmailablePlayers(any())).thenReturn(players);
+        server = Mockito.mock(Server.class);
+        when(server.getEmailService()).thenReturn(email);
+        staticMock = Mockito.mockStatic(Server.class);
+        staticMock.when(Server::getServerInstance).thenReturn(server);
+    }
+
+    @BeforeEach
     public void init() {
         entityActions = createActionVector();
         tank = createEntity();
@@ -132,17 +148,6 @@ public class PhasesTest {
         processors.add(new FireProcessor(manager));
         processors.add(new GeyserProcessor(manager));
         when(manager.getTerrainProcessors()).thenReturn(processors);
-
-        Player player = Mockito.mock(Player.class);
-        Vector<Player> players = new Vector<>();
-        players.add(player);
-        EmailService email = Mockito.mock(EmailService.class);
-        when(email.getEmailablePlayers(any())).thenReturn(players);
-        Server server = Mockito.mock(Server.class);
-        when(server.getEmailService()).thenReturn(email);
-        MockedStatic<Server> staticMock = Mockito.mockStatic(Server.class);
-        staticMock.when(Server::getServerInstance).thenReturn(server);
-
     }
 
     @Test
