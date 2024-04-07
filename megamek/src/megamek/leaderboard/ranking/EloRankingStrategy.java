@@ -1,5 +1,7 @@
-package megamek.leaderboard;
+package megamek.leaderboard.ranking;
 
+import megamek.leaderboard.PlayerStats;
+import megamek.leaderboard.ranking.IRankingStrategy;
 import megamek.server.victory.VictoryResult;
 import org.apache.logging.log4j.LogManager;
 

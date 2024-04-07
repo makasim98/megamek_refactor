@@ -1,4 +1,4 @@
-package megamek.leaderboard;
+package megamek.leaderboard.storage;
 
 public enum LeaderboardStorage {
     CSV,

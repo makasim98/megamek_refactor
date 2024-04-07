@@ -1,4 +1,6 @@
-package megamek.leaderboard;
+package megamek.leaderboard.storage;
+
+import megamek.leaderboard.PlayerStats;
 
 import java.util.List;
 

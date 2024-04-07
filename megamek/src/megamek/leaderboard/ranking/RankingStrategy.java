@@ -1,4 +1,4 @@
-package megamek.leaderboard;
+package megamek.leaderboard.ranking;
 
 public enum RankingStrategy {
     ELO,
