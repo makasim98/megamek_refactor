@@ -28,10 +28,12 @@ public class PlayerStats implements Serializable {
     {
         return wins;
     }
+    public void incrementWins() { this.wins += 1;}
     public int getLoss()
     {
         return loss;
     }
+    public void incrementLosses() { this.loss += 1;}
 
     public PlayerStats(String name, String email, int wins, int loss, int ranking) {
         this.name = name;

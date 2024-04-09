@@ -74,13 +74,16 @@ public class EloRankingStrategy implements IRankingStrategy {
             PlayerStats currentPlayerStats = playerStatsMap.get(p.getName());
             int newRanking = (int) (currentPlayerStats.getRanking() + K*(sValueTeam1 - probTeam1));
             currentPlayerStats.setRanking(newRanking);
+            if (didTeam1Win) currentPlayerStats.incrementWins();
+            else currentPlayerStats.incrementLosses();
         }
         for (Player p: team2Players) {
             PlayerStats currentPlayerStats = playerStatsMap.get(p.getName());
             int newRanking = (int) (currentPlayerStats.getRanking() + K*(sValueTeam2 - probTeam2));
             currentPlayerStats.setRanking(newRanking);
+            if (didTeam2Win) currentPlayerStats.incrementWins();
+            else currentPlayerStats.incrementLosses();;
         }
-        // Update each loser's score based on winner
         return currRanking;
     }
 }
