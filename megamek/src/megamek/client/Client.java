@@ -1433,7 +1433,7 @@ public class Client implements IClientCommandHandler {
                     localPlayerNumber = c.getIntValue(0);
                     break;
                 case LEADERBOARD_UPDATE:
-                    rankings = new ArrayList<>((List) c.getObject(0));
+                    rankings = new ArrayList<>((List<PlayerStats>) c.getObject(0));
                     break;
                 case PLAYER_UPDATE:
                     receivePlayerInfo(c);
