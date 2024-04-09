@@ -1,5 +1,6 @@
 package megamek.leaderboard;
 
+import megamek.common.Team;
 import megamek.leaderboard.ranking.EloRankingStrategy;
 import megamek.leaderboard.ranking.IRankingStrategy;
 import megamek.leaderboard.ranking.RankingStrategy;

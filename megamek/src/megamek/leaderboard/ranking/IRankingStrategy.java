@@ -1,5 +1,6 @@
 package megamek.leaderboard.ranking;
 
+import megamek.common.Team;
 import megamek.leaderboard.PlayerStats;
 import megamek.server.victory.VictoryResult;
 

@@ -1,5 +1,6 @@
 package megamek.leaderboard;
 
+import megamek.common.Team;
 import megamek.server.victory.VictoryResult;
 
 import java.util.List;

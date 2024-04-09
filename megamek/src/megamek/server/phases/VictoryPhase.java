@@ -13,10 +13,7 @@ import megamek.server.UnitStatusFormatter;
 import megamek.server.victory.VictoryResult;
 import org.apache.logging.log4j.LogManager;
 
-import java.util.Enumeration;
-import java.util.Iterator;
-import java.util.Optional;
-import java.util.Vector;
+import java.util.*;
 
 public class VictoryPhase extends AbstractGamePhase{
     public VictoryPhase(GameManager manager) {
