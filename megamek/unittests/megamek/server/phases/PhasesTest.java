@@ -8,10 +8,7 @@ import megamek.common.force.Forces;
 import megamek.common.options.GameOptions;
 import megamek.common.util.EmailService;
 import megamek.server.*;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.TestInstance;
+import org.junit.jupiter.api.*;
 import org.mockito.MockedStatic;
 import org.mockito.Mockito;
 
@@ -131,6 +128,11 @@ public class PhasesTest {
         when(server.getEmailService()).thenReturn(email);
         staticMock = Mockito.mockStatic(Server.class);
         staticMock.when(Server::getServerInstance).thenReturn(server);
+    }
+
+    @AfterAll
+    public void cleanup() {
+        staticMock.close();
     }
 
     @BeforeEach

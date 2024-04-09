@@ -47,7 +47,7 @@ public class LeaderboardManager implements ILeaderboardManager {
 
         playerRankings = new ArrayList<>(newRankings);
 
-        return getRankings();
+        return playerRankings;
     }
 
     private ILeaderboardStorage initStorage(LeaderboardStorage type) {
